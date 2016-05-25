@@ -1,0 +1,78 @@
+---
+title: "Fun with floats"
+output:
+  html_document: default
+date: "May 25, 2016"
+---
+  
+```{r}
+suppressPackageStartupMessages(library(purrr))
+
+with_expr_and_result <- function(f) {
+  stopifnot(is_character(f))
+  force(f)
+  function(...) {
+    args <- list(...)
+    FUN <- eval(as.name(f))
+    x <- FUN(...)
+    message(sprintf("(%s %s %s) == %s", args[[1]], f, args[[2]], x))
+    x
+  }
+}
+
+like_ninja <- function(f) {
+  function(...) {
+    x <- f(...)
+    invisible(x)
+  }
+}
+
+float_equal <- function(e1, e2, tolerance = .Machine$double.eps ^ 0.5) {
+  e1 - e2 < tolerance
+}
+
+funs <- c("==", "-") %>% map(with_expr_and_result)
+
+f <- function(x) x ^ 2
+g <- function(x) sqrt(x)
+fog <- function(x) f(g(x))  # fog and gof should return same result
+gof <- function(x) g(f(x))
+
+(y <- c(fog, gof) %>% map(~.x(1L:10L)))            # All equal, as expected
+y %>% like_ninja(pmap_lgl)(funs[[1]])              # Wait, what? [^1]
+y %>% like_ninja(pmap_dbl)(funs[[2]])              # Oh, right. Floats...
+y %>% pmap_lgl(float_equal)                        # There we go
+
+lift(all.equal)(y)    # Canonical way to test for equality of floating points
+
+# 1: Or for the sadists: funs %>% like_ninja(map)(~pmap(y, .x))
+```
+
+We can use the `Rmpfr` package to investigate further how (un)precise the 
+results are:
+  
+```{r}
+suppressPackageStartupMessages(library("Rmpfr"))
+y %>% map(mpfr, precBits = .Machine$double.digits)
+```
+
+Unsurprisingly, the problem is with the `fog` function, which first takes the
+square root and then exponentiates the result.
+
+This result relates back to a comment that Hadley Wickham made on Twitter some
+time ago:
+  
+<blockquote class="twitter-tweet" data-lang="en">
+<p lang="en" dir="ltr">
+<a href="https://twitter.com/hadleywickham">@hadleywickham</a> Neat! 
+<a href="https://t.co/PmJXnYqM45">pic.twitter.com/PmJXnYqM45</a>
+</p>&mdash; EP (@expersso) 
+<a href="https://twitter.com/expersso/status/676771253647253504">December 15, 2015</a>
+</blockquote>
+<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+  
+```{r}
+wat <- function(x) (1 / x) * x
+wat(1:49) %>% mpfr(.Machine$double.digits)
+```
+
